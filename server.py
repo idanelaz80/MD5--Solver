@@ -21,22 +21,31 @@ start_time = None
 
 
 def get_block():
-    # מחזיר את הנתח הבא לחישוב, או None אם נגמר / כבר נמצא
+    """
+    מחזירה את נתח העבודה הבא לחלוקה - קודם נתחים שחזרו לתור, ואז נתח חדש. אין פרמטרים.
+    :return: tuple של (start, end), או None אם נמצא פתרון או שנגמרו המספרים
+    """
     global next_start
+    result = None
     with lock:
-        if found:
-            return None
-        if requeued:                    # קודם כל נחלק נתחים של ליבות שנפלו
-            return requeued.pop(0)
-        if next_start > SPACE_MAX:
-            return None
-        start = next_start
-        end = min(start + BLOCK_SIZE - 1, SPACE_MAX)
-        next_start = end + 1
-        return start, end
+        if not found:
+            if requeued:
+                result = requeued.pop(0)
+            elif next_start <= SPACE_MAX:
+                start = next_start
+                end = min(start + BLOCK_SIZE - 1, SPACE_MAX)
+                next_start = end + 1
+                result = (start, end)
+    return result
 
 
 def handle_client(conn, addr):
+    """
+    מטפלת בלקוח אחד (thread נפרד): מקבלת בקשות GET/FOUND ומחלקת נתחים עד שהחיבור נסגר.
+    :param conn: אובייקט ה-socket של החיבור ללקוח
+    :param addr: tuple של (ip, port) של הלקוח
+    :return: אין (None)
+    """
     global found, found_number, start_time
     ip = addr[0]
     current_block = None      # הנתח שהליבה הזאת עובדת עליו כרגע
@@ -53,8 +62,6 @@ def handle_client(conn, addr):
             data = conn.recv(1024).decode().strip()
             if not data:
                 break
-
-            # ההודעות הן טקסט פשוט: "GET" או "FOUND <מספר>"
             if data == "GET":
                 current_block = None    # אם ביקש נתח חדש - סימן שסיים את הקודם
                 block = get_block()
@@ -64,7 +71,6 @@ def handle_client(conn, addr):
                     current_block = block
                     msg = "BLOCK " + str(block[0]) + " " + str(block[1]) + "\n"
                     conn.sendall(msg.encode())
-
             elif data.startswith("FOUND"):
                 number = data.split()[1]
                 current_block = None
@@ -73,11 +79,10 @@ def handle_client(conn, addr):
                         found = True
                         found_number = number
                         elapsed = time.time() - start_time
-                        print("\n===== נמצא פתרון! =====")
+                        print("\nנמצא פתרון!")
                         print("המספר שפוענח:", number)
                         print("מספר המחשבים:", len(machines))
                         print("זמן בשניות: %.2f" % elapsed)
-                        print("=======================\n")
                 conn.sendall(b"OK\n")
 
             else:
@@ -95,8 +100,11 @@ def handle_client(conn, addr):
 
 
 def main():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    """
+    הפעולה הראשית של השרת: פותחת socket, מאזינה לחיבורים ופותחת thread לכל לקוח. אין פרמטרים.
+    :return: אין (None)
+    """
+    sock = socket.socket()
     sock.bind((HOST, PORT))
     sock.listen(100)
 
